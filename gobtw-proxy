@@ -1,0 +1,344 @@
+#!/usr/bin/python2.7
+
+
+from __future__ import print_function
+
+import contextlib
+import select
+import time
+import sys
+import os
+import re
+import json
+import random
+import socket
+import requests
+import traceback
+
+class LsnrReset(Exception):
+    pass
+
+
+def bdecode(buff):
+    """
+    On python, convert bytes to string using utf-8 and ascii as a fallback
+    """
+    if buff is None:
+        return buff
+    if sys.version_info[0] < 3:
+        return buff
+    if type(buff) == str:
+        return buff
+    else:
+        return buff.decode("utf-8", errors="ignore")
+    return buff
+
+def msg_encode(data):
+    return (json.dumps(data)+'\0').encode()
+
+def msg_decode(message):
+    message = bdecode(message).rstrip("\0\x00")
+    if len(message) == 0:
+        return
+    return json.loads(message)
+
+def test_dict(dict1, dict2):
+    if (dict1 == {}) or (dict2 == {}):
+        print('dict empty')
+        return False
+    dict_to_del = dict2.copy()
+    for key, val in dict1.iteritems():
+        if key in dict_to_del:
+            if val == dict_to_del[key]:
+                del dict_to_del[key]
+    if dict_to_del == {}:
+        return True
+    else:
+        return False
+
+
+class GoBetweenProxy(object):
+    @contextlib.contextmanager
+    def lsnr_socket(self):
+        if "OPENSVC_LSNR_SOCK" in os.environ:
+            lsnr_path = os.environ["OPENSVC_LSNR_SOCK"]
+        else:
+            #lsnr_path = "/var/run/lsnr/lsnr.sock"
+	    lsnr_path = "/var/lib/opensvc/lsnr/lsnr.sock"
+
+        print("init listener socket")
+        try:
+            lsnr = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            lsnr.settimeout(1)
+            lsnr.connect(lsnr_path)
+            yield lsnr
+        finally:
+            lsnr.close()
+
+
+    def recv_message(self, sock, stream=False):
+        chunks = []
+        messages = []
+        sep = b"\x00"
+        while True:
+            try:
+                chunk = sock.recv(4096)
+            except socket.timeout:
+                break
+            if stream and chunk == b'':
+                # disconnect
+                raise LsnrReset
+            if not chunk or chunk == sep:
+                break
+            chunks.append(chunk)
+
+        if sys.version_info[0] >= 3:
+            data = b"".join(chunks)
+        else:
+            data = "".join(chunks)
+        if len(data) == 0:
+            return []
+        for message in data.split(sep):
+            message = msg_decode(message)
+            messages.append(message)
+        return messages 
+
+
+    def add_services_lb(self, svc):
+	
+        keyword_proxy = {
+        "gobetween_ingress_bind": "bind",
+        "gobetween_ingress_protocol": "protocol",
+        "gobetween_ingress_balance": "balance",
+        "gobetween_ingress_max_connections": "max_connections",
+        "gobetween_ingress_client_idle_timeout": "client_idle_timeout",
+        "gobetween_ingress_backend_idle_timeout": "backend_idle_timeout",
+        "gobetween_ingress_backend_connection_timeout": "backend_connection_timeout",
+        "gobetween_ingress_sni": "sni",
+        "gobetween_ingress_tls": "tls",
+        "gobetween_ingress_backends_tls": "backends_tls",
+        "gobetween_ingress_udp": "udp",
+        "gobetween_ingress_access": "access",
+        "gobetween_ingress_proxy_protocol": "proxy_protocol",
+        "gobetween_ingress_discovery_failpolicy": ["discovery", "failpolicy"],
+        "gobetween_ingress_discovery_kind": ["discovery", "kind"],
+        "gobetween_ingress_discovery_srv_dns_protocol": ["discovery", "srv_dns_protocol"],
+        "gobetween_ingress_discovery_srv_lookup_server": ["discovery", "srv_lookup_server"],
+        "gobetween_ingress_discovery_srv_lookup_pattern": ["discovery", "srv_lookup_pattern"],
+        "gobetween_ingress_discovery_interval": ["discovery", "interval"],
+        "gobetween_ingress_discovery_timeout": ["discovery", "timeout"],
+        "gobetween_ingress_healthcheck_fails": ["healthcheck", "fails"],
+        "gobetween_ingress_healthcheck_passes": ["healthcheck", "passes"],
+        "gobetween_ingress_healthcheck_interval": ["healthcheck", "interval"],
+        "gobetween_ingress_healthcheck_kind": ["healthcheck", "kind"],
+        "gobetween_ingress_healthcheck_timeout": ["healthcheck", "timeout"]
+        }	
+
+        url = 'http://192.168.100.32:8888/servers/' + svc
+        headers = {'content-type': 'application/json'}
+
+        data =  {  
+        "bind": None,
+        "protocol": "tcp",
+        "balance": "weight",
+        "max_connections": 0,
+        "client_idle_timeout": "0",
+        "backend_idle_timeout": "0",
+        "backend_connection_timeout": "0",
+        "sni": None,
+        "tls": None,
+        "backends_tls": None,
+        "udp": None,
+        "access": None,
+        "proxy_protocol": None,
+        "discovery": {
+                "failpolicy": "keeplast",
+                "kind": "srv",
+                "srv_dns_protocol": "tcp",
+                "srv_lookup_server": '',
+                "srv_lookup_pattern": '',
+                "interval": "0",
+                "timeout": "0"
+                },
+        "healthcheck": {
+                "fails": 1,
+                "passes": 1,
+                "interval": "2s",
+                "kind": "ping",
+                "timeout": "500ms"
+                }
+        }	
+
+
+        with self.lsnr_socket() as lsnr:
+            lsnr.send(msg_encode({"action": "get_service_config", "options": {"svcname": svc, "format": "json", "evaluate": True}}))
+            svc_json = self.recv_message(lsnr)[0]
+            dic = svc_json['env']
+            for key in dic:
+                if (key.startswith('gobetween_ingress_')) and (key in keyword_proxy) :
+                    if type(keyword_proxy[key]) is list:
+                        data[keyword_proxy[key][0]][keyword_proxy[key][1]] = dic[key]
+                    else:
+                        data[keyword_proxy[key]] = dic[key]
+
+
+        #test whether or not we should update the service conf in gobetween 
+        current_data = requests.get("http://192.168.100.32:8888/servers").json()
+
+        if svc in current_data:
+            if test_dict(current_data[svc], data):
+                print('service already configured')
+                return
+            else:
+                r = requests.delete(url)
+		print(r.status_code)
+
+        current_data2 = requests.get("http://192.168.100.32:8888/servers").json()
+
+	#Mendatory Key
+	try:
+	    if data['bind'] is None:
+                raise ValueError('must fill this field')
+	except ValueError:
+            print('mendatory key missing in data')
+            return
+
+	#make sure u are binding on a free port
+	current_bind = []
+	for elem in current_data2:
+	    current_bind.append(current_data2[elem]['bind'])
+	port = []
+	for bind in current_bind:
+	    port.append(int(bind.split(':')[1]))
+	
+
+	if int(data['bind'].split(':')[1]) in port:
+ 	    print('this port is busy, will bind a free port by default')
+	    allowed_values = list(range(1024, 65535+1))
+	    for num in port:
+		if num in allowed_values:
+		    allowed_values.remove(num)
+	    data['bind'] = data['bind'].split(':')[0] + ':' + str(random.choice(allowed_values))	    
+	    with self.lsnr_socket() as lsnr:
+                lsnr.send(msg_encode({"action": "service_action", "options": {"svcname": svc, "cmd": ["set", "--kw=env.gobetween_ingress_bind="+ data['bind']]}}))
+
+
+	req = requests.post(url, data=json.dumps(data), headers=headers)
+        time.sleep(10)        
+        print('----------------------')
+
+	if req.status_code != 200:
+	    print('failed to post')
+	    return
+
+
+
+    def del_services_lb(self, svc):
+	url = 'http://192.168.100.32:8888/servers/' + svc
+	
+	req = requests.delete(url)
+	
+	if req.status_code != 200:
+            print('failed to post')
+            return
+
+
+    def event_router(self, data):
+	if data is None:
+	    return
+	else:
+	    changes = data.get("data", {})
+            remove = False
+	    service = None
+	    del_service = None
+            for change in changes:
+                change_len = len(change)
+		
+		#Show events
+                #print(change)
+	    #print('-------------------------')
+
+                if change_len == 2:
+                    key, val = change
+	
+		    if len(key) == 3 and \
+                     key[0] == "services" and \
+                     key[1] == "status":
+                         svcname = key[2]
+                         expr = r"^[0-9]+\."
+			 if re.match(expr, svcname):
+                             pass
+                         else:
+                             print('add service', svcname)
+                             service = svcname
+	 
+		    if len(key) == 4 and \
+		     key[0] == "services" and \
+		     key[1] == "config" and \
+		     key[3] == "updated":
+		         svcname = key[2]
+                         expr = r"^[0-9]+\."
+                         if re.match(expr, svcname):
+                             pass
+                         else:
+                             print('update service', svcname)
+                             service = svcname
+
+
+                elif change_len == 1:
+                    key = change[0]
+                    if len(key) == 3 and \
+                     key[0] == "services" and \
+                     key[1] == "status":
+                         svcname = del_service = key[2]
+			 if del_service != None:
+                             print("delete instance", svcname)
+                             remove = True
+	
+
+	    if service != None:
+		with self.lsnr_socket() as lsnr:
+		    lsnr.send(msg_encode({"action": "get_service_config", "options": {"svcname": service, "format": "json", "evaluate": True}}))    
+		    config = self.recv_message(lsnr)[0]
+		    if config.has_key('env'): 
+		    	if ('gobetween_ingress_target_lb' in config['env']) and (config['env']['gobetween_ingress_target_lb'] == 'yes'):
+			    self.add_services_lb(service)
+			else:
+			    print('this service doesn\'t enable load balancing')
+		    else:
+			print('this service doesn\'t enable load balancing') 
+
+	    elif remove:
+		self.del_services_lb(del_service)
+
+
+    def mainloop(self, lsnr):
+	messages = self.recv_message(lsnr, stream=True)
+	for message in messages:
+	    self.event_router(message)
+		
+
+    def main(self):
+	
+	try:
+	    with self.lsnr_socket() as lsnr:
+	        lsnr.sendall(msg_encode({"action": "events"}))
+	        if lsnr is None:
+		    raise Exception("lsnr socket not ready")
+	        while True:
+		    self.mainloop(lsnr)
+	except LsnrReset:
+	    time.sleep(1)
+	
+	except Exception:
+	    traceback.print_exc()
+	    time.sleep(1)
+
+	
+
+if __name__ == "__main__":
+    try:
+        o = GoBetweenProxy()
+        o.main()
+    except KeyboardInterrupt:
+        pass
