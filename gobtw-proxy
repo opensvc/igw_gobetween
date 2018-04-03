@@ -218,7 +218,7 @@ class GoBetweenProxy(object):
 	    for num in port:
 		if num in allowed_values:
 		    allowed_values.remove(num)
-	    data['bind'] = data['bind'].split(':')[0] + ':' + str(random.choice(allowed_values))	    
+	    data['bind'] = data['bind'].split(':')[0] + ':' + str(allowed_values[0])	    
 	    with self.lsnr_socket() as lsnr:
                 lsnr.send(msg_encode({"action": "service_action", "options": {"svcname": svc, "cmd": ["set", "--kw=env.gobetween_ingress_bind="+ data['bind']]}}))
 
@@ -312,6 +312,39 @@ class GoBetweenProxy(object):
 		self.del_services_lb(del_service)
 
 
+    def current_services(self):
+        with self.lsnr_socket() as lsnr:
+            if lsnr is None:
+                print("lsnr socket not ready")
+                time.sleep(1)
+                return
+            lsnr.sendall(msg_encode({"action": "daemon_status"}))
+            data = self.recv_message(lsnr)[0]
+            if data is None:
+                print("unable to get data")
+                return
+            services = []
+            for elem in data["monitor"]["services"]:
+                expr = r"^[0-9]+\."
+                if re.match(expr, elem) or (data["monitor"]["services"][elem]["avail"] != 'up'):
+                    pass
+                else:
+                    services.append(elem)
+
+        for service in services:
+            with self.lsnr_socket() as lsnr:
+                lsnr.send(msg_encode({"action": "get_service_config", "options": {"svcname": service, "format": "json", "evaluate": True}}))
+                config = self.recv_message(lsnr)[0]
+                if config.has_key('env'):
+                    if ('gobetween_ingress_target_lb' in config['env']) and (config['env']['gobetween_ingress_target_lb'] == 'yes'):
+                        self.add_services_lb(service)
+                    else:
+                        print('this service doesn\'t enable load balancing')
+                else:
+                    print('this service doesn\'t enable load balancing')
+
+
+
     def mainloop(self, lsnr):
 	messages = self.recv_message(lsnr, stream=True)
 	for message in messages:
@@ -326,6 +359,7 @@ class GoBetweenProxy(object):
 	        if lsnr is None:
 		    raise Exception("lsnr socket not ready")
 	        while True:
+                    self.current_services()
 		    self.mainloop(lsnr)
 	except LsnrReset:
 	    time.sleep(1)
