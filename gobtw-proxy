@@ -251,6 +251,7 @@ class GoBetweenProxy(object):
             remove = False
 	    service = None
 	    del_service = None
+            service_update = None
             for change in changes:
                 change_len = len(change)
 		
@@ -282,8 +283,7 @@ class GoBetweenProxy(object):
                              pass
                          else:
                              print('update service', svcname)
-                             service = svcname
-
+                             service_update = svcname
 
                 elif change_len == 1:
                     key = change[0]
@@ -308,6 +308,24 @@ class GoBetweenProxy(object):
 		    else:
 			print('this service doesn\'t enable load balancing') 
 
+            elif service_update != None:
+	        with self.lsnr_socket() as lsnr:
+                    lsnr.send(msg_encode({"action": "get_service_config", "options": {"svcname": service_update, "format": "json", "evaluate": True}}))
+                    config = self.recv_message(lsnr)[0]
+                    if config.has_key('env'):
+                        if ('gobetween_ingress_target_lb' in config['env']) and (config['env']['gobetween_ingress_target_lb'] == 'yes'):
+            	            print('adding/changing lb parameters')
+                            self.add_services_lb(service_update)
+                        else:
+                            print('this service doesn\'t enable load balancing')
+                    else:
+        	        req = requests.get("http://192.168.100.32:8888/servers").json()
+        	        if service_update in req:
+                            print('this service no longer enable load balancing')
+        		    self.del_services_lb(service_update)
+                        else:
+                            print('this service doesn\'t enable load balancing')
+                          
 	    elif remove:
 		self.del_services_lb(del_service)
 
