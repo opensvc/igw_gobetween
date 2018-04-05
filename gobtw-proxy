@@ -15,6 +15,77 @@ import socket
 import requests
 import traceback
 
+
+HEADERS = {'content-type': 'application/json'}
+
+KEYWORD_PROXY = {
+    "gobetween_ingress_bind": "bind",
+    "gobetween_ingress_protocol": "protocol",
+    "gobetween_ingress_balance": "balance",
+    "gobetween_ingress_max_connections": "max_connections",
+    "gobetween_ingress_client_idle_timeout": "client_idle_timeout",
+    "gobetween_ingress_backend_idle_timeout": "backend_idle_timeout",
+    "gobetween_ingress_backend_connection_timeout": "backend_connection_timeout",
+    "gobetween_ingress_sni": "sni",
+    "gobetween_ingress_tls": "tls",
+    "gobetween_ingress_backends_tls": "backends_tls",
+    "gobetween_ingress_udp": "udp",
+    "gobetween_ingress_access": "access",
+    "gobetween_ingress_proxy_protocol": "proxy_protocol",
+    "gobetween_ingress_discovery_failpolicy": ["discovery", "failpolicy"],
+    "gobetween_ingress_discovery_kind": ["discovery", "kind"],
+    "gobetween_ingress_discovery_srv_dns_protocol": ["discovery", "srv_dns_protocol"],
+    "gobetween_ingress_discovery_srv_lookup_server": ["discovery", "srv_lookup_server"],
+    "gobetween_ingress_discovery_srv_lookup_pattern": ["discovery", "srv_lookup_pattern"],
+    "gobetween_ingress_discovery_interval": ["discovery", "interval"],
+    "gobetween_ingress_discovery_timeout": ["discovery", "timeout"],
+    "gobetween_ingress_healthcheck_fails": ["healthcheck", "fails"],
+    "gobetween_ingress_healthcheck_passes": ["healthcheck", "passes"],
+    "gobetween_ingress_healthcheck_interval": ["healthcheck", "interval"],
+    "gobetween_ingress_healthcheck_kind": ["healthcheck", "kind"],
+    "gobetween_ingress_healthcheck_timeout": ["healthcheck", "timeout"]
+    }
+
+
+GOBETWEEN_DATA =  {
+    "bind": None,
+    "protocol": "tcp",
+    "balance": "weight",
+    "max_connections": 0,
+    "client_idle_timeout": "0",
+    "backend_idle_timeout": "0",
+    "backend_connection_timeout": "0",
+    "sni": None,
+    "tls": None,
+    "backends_tls": None,
+    "udp": None,
+    "access": None,
+    "proxy_protocol": None,
+    "discovery": {
+        "failpolicy": "keeplast",
+        "kind": "srv",
+        "srv_dns_protocol": "tcp",
+        "srv_lookup_server": '',
+        "srv_lookup_pattern": '',
+        "interval": "0",
+        "timeout": "0"
+        },
+    "healthcheck": {
+        "fails": 1,
+        "passes": 1,
+        "interval": "2s",
+        "kind": "ping",
+        "timeout": "500ms"
+        }
+    }
+
+
+gobetween_ip = '192.168.100.32'
+gobetween_port = '8888'
+url = 'http://'+gobetween_ip+':'+gobetween_port
+gobetween_status = requests.get(url+'/').json()
+
+
 class LsnrReset(Exception):
     pass
 
@@ -103,162 +174,113 @@ class GoBetweenProxy(object):
             messages.append(message)
         return messages 
 
+    def get_gobetween_data(self):
+        try:
+            data = requests.get(url + '/servers')
+            if data.status_code != 200:
+                raise Exception('couldn\'t retrieve the data')
+            else:
+                return data.json()
+        except Exception:
+            time.sleep(1)
+            return
+        
 
     def add_services_lb(self, svc):
 	
-        keyword_proxy = {
-        "gobetween_ingress_bind": "bind",
-        "gobetween_ingress_protocol": "protocol",
-        "gobetween_ingress_balance": "balance",
-        "gobetween_ingress_max_connections": "max_connections",
-        "gobetween_ingress_client_idle_timeout": "client_idle_timeout",
-        "gobetween_ingress_backend_idle_timeout": "backend_idle_timeout",
-        "gobetween_ingress_backend_connection_timeout": "backend_connection_timeout",
-        "gobetween_ingress_sni": "sni",
-        "gobetween_ingress_tls": "tls",
-        "gobetween_ingress_backends_tls": "backends_tls",
-        "gobetween_ingress_udp": "udp",
-        "gobetween_ingress_access": "access",
-        "gobetween_ingress_proxy_protocol": "proxy_protocol",
-        "gobetween_ingress_discovery_failpolicy": ["discovery", "failpolicy"],
-        "gobetween_ingress_discovery_kind": ["discovery", "kind"],
-        "gobetween_ingress_discovery_srv_dns_protocol": ["discovery", "srv_dns_protocol"],
-        "gobetween_ingress_discovery_srv_lookup_server": ["discovery", "srv_lookup_server"],
-        "gobetween_ingress_discovery_srv_lookup_pattern": ["discovery", "srv_lookup_pattern"],
-        "gobetween_ingress_discovery_interval": ["discovery", "interval"],
-        "gobetween_ingress_discovery_timeout": ["discovery", "timeout"],
-        "gobetween_ingress_healthcheck_fails": ["healthcheck", "fails"],
-        "gobetween_ingress_healthcheck_passes": ["healthcheck", "passes"],
-        "gobetween_ingress_healthcheck_interval": ["healthcheck", "interval"],
-        "gobetween_ingress_healthcheck_kind": ["healthcheck", "kind"],
-        "gobetween_ingress_healthcheck_timeout": ["healthcheck", "timeout"]
-        }	
-
-        url = 'http://192.168.100.32:8888/servers/' + svc
-        headers = {'content-type': 'application/json'}
-
-        data =  {  
-        "bind": None,
-        "protocol": "tcp",
-        "balance": "weight",
-        "max_connections": 0,
-        "client_idle_timeout": "0",
-        "backend_idle_timeout": "0",
-        "backend_connection_timeout": "0",
-        "sni": None,
-        "tls": None,
-        "backends_tls": None,
-        "udp": None,
-        "access": None,
-        "proxy_protocol": None,
-        "discovery": {
-                "failpolicy": "keeplast",
-                "kind": "srv",
-                "srv_dns_protocol": "tcp",
-                "srv_lookup_server": '',
-                "srv_lookup_pattern": '',
-                "interval": "0",
-                "timeout": "0"
-                },
-        "healthcheck": {
-                "fails": 1,
-                "passes": 1,
-                "interval": "2s",
-                "kind": "ping",
-                "timeout": "500ms"
-                }
-        }	
-
-
+        url_service = url + '/servers/' + svc
+        data_change = GOBETWEEN_DATA.copy()
         with self.lsnr_socket() as lsnr:
             lsnr.send(msg_encode({"action": "get_service_config", "options": {"svcname": svc, "format": "json", "evaluate": True}}))
-            svc_json = self.recv_message(lsnr)[0]
-            dic = svc_json['env']
-            for key in dic:
-                if (key.startswith('gobetween_ingress_')) and (key in keyword_proxy) :
-                    if type(keyword_proxy[key]) is list:
-                        data[keyword_proxy[key][0]][keyword_proxy[key][1]] = dic[key]
+            svc_env = self.recv_message(lsnr)[0]['env']
+            for key in svc_env:
+                if key in KEYWORD_PROXY:
+                    if type(KEYWORD_PROXY[key]) is list:
+                        data_change[KEYWORD_PROXY[key][0]][KEYWORD_PROXY[key][1]] = svc_env[key]
                     else:
-                        data[keyword_proxy[key]] = dic[key]
+                        data_change[KEYWORD_PROXY[key]] = svc_env[key]
 
 
-        #test whether or not we should update the service conf in gobetween 
-        current_data = requests.get("http://192.168.100.32:8888/servers").json()
+        # test whether or not we should update the service conf in gobetween 
+        current_data = self.get_gobetween_data()
 
         if svc in current_data:
-            if test_dict(current_data[svc], data):
+            if test_dict(current_data[svc], data_change):
                 print('service already configured')
                 return
             else:
-                r = requests.delete(url)
-		print(r.status_code)
+                try:
+                    current_svc = requests.delete(url_service)
+                    if current_svc.status_code != 200:
+                        raise Exception('couldn\'t delete current service configuration')
+                except Exception:
+                    time.sleep(1)
+                    return
+                
+        current_data2 = self.get_gobetween_data()
 
-        current_data2 = requests.get("http://192.168.100.32:8888/servers").json()
-
-	#Mendatory Key
-	try:
-	    if data['bind'] is None:
+	# mandatory key
+        try:
+            if data_change['bind'] is None:
                 raise ValueError('must fill this field')
-	except ValueError:
-            print('mendatory key missing in data')
+        except ValueError:
+            print('mandatory key missing in data')
             return
 
-	#make sure u are binding on a free port
-	current_bind = []
-	for elem in current_data2:
-	    current_bind.append(current_data2[elem]['bind'])
-	port = []
-	for bind in current_bind:
-	    port.append(int(bind.split(':')[1]))
+	# make sure u are binding on a free port
+        current_bind = []
+        for elem in current_data2:
+            current_bind.append(current_data2[elem]['bind'])
+        port = []
+        for bind in current_bind:
+            port.append(int(bind.split(':')[1]))
 	
+        if int(data_change['bind'].split(':')[1]) in port:
+            print('this port is busy, will bind a free port by default')
+            allowed_values = list(range(1024, 65535+1))
+            for num in port:
+                if num in allowed_values:
+                    allowed_values.remove(num)
+            data_change['bind'] = data_change['bind'].split(':')[0] + ':' + str(allowed_values[0])	    
+            with self.lsnr_socket() as lsnr:
+                lsnr.send(msg_encode({"action": "service_action", "options": {"svcname": svc, "cmd": ["set", "--kw=env.gobetween_ingress_bind="+ data_change['bind']]}}))
 
-	if int(data['bind'].split(':')[1]) in port:
- 	    print('this port is busy, will bind a free port by default')
-	    allowed_values = list(range(1024, 65535+1))
-	    for num in port:
-		if num in allowed_values:
-		    allowed_values.remove(num)
-	    data['bind'] = data['bind'].split(':')[0] + ':' + str(allowed_values[0])	    
-	    with self.lsnr_socket() as lsnr:
-                lsnr.send(msg_encode({"action": "service_action", "options": {"svcname": svc, "cmd": ["set", "--kw=env.gobetween_ingress_bind="+ data['bind']]}}))
+        print(data_change)
 
-
-	req = requests.post(url, data=json.dumps(data), headers=headers)
-        time.sleep(10)        
-        print('----------------------')
-
-	if req.status_code != 200:
-	    print('failed to post')
-	    return
+        try:
+            post_service = requests.post(url_service, data=json.dumps(data_change), headers=HEADERS)      
+            if post_service.status_code != 200:
+                raise Exception('failed to post')
+        except Exception:
+            time.sleep(1)
+            return
 
 
 
     def del_services_lb(self, svc):
-	url = 'http://192.168.100.32:8888/servers/' + svc
-	
-	req = requests.delete(url)
-	
-	if req.status_code != 200:
-            print('failed to post')
-            return
+        
+        url_service = url + '/servers/' + svc
+        try:
+            del_service = requests.delete(url_service)
+            if del_service.status_code != 200:
+                raise Exception('couldn\'t delete the service configuration')
+        except Exception:
+            time.sleep(1)
+            return	
 
 
     def event_router(self, data):
-	if data is None:
-	    return
-	else:
-	    changes = data.get("data", {})
+        if data is None:
+            return
+        else:
+            changes = data.get("data", {})
             remove = False
-	    service = None
-	    del_service = None
+            service = None
+            del_service = None
             service_update = None
             for change in changes:
                 change_len = len(change)
 		
-		#Show events
-                #print(change)
-	    #print('-------------------------')
-
                 if change_len == 2:
                     key, val = change
 	
@@ -296,17 +318,17 @@ class GoBetweenProxy(object):
                              remove = True
 	
 
-	    if service != None:
-		with self.lsnr_socket() as lsnr:
-		    lsnr.send(msg_encode({"action": "get_service_config", "options": {"svcname": service, "format": "json", "evaluate": True}}))    
-		    config = self.recv_message(lsnr)[0]
-		    if config.has_key('env'): 
-		    	if ('gobetween_ingress_target_lb' in config['env']) and (config['env']['gobetween_ingress_target_lb'] == 'yes'):
-			    self.add_services_lb(service)
-			else:
-			    print('this service doesn\'t enable load balancing')
-		    else:
-			print('this service doesn\'t enable load balancing') 
+            if service != None:
+                with self.lsnr_socket() as lsnr:
+                    lsnr.send(msg_encode({"action": "get_service_config", "options": {"svcname": service, "format": "json", "evaluate": True}}))    
+                    config = self.recv_message(lsnr)[0]
+                    if config.has_key('env'): 
+                        if ('gobetween_ingress_target_lb' in config['env']) and (config['env']['gobetween_ingress_target_lb'] == 'yes'):
+                            self.add_services_lb(service)
+                        else:
+                            print('this service doesn\'t enable load balancing')
+                    else:
+                        print('this service doesn\'t enable load balancing') 
 
             elif service_update != None:
 	        with self.lsnr_socket() as lsnr:
@@ -317,9 +339,9 @@ class GoBetweenProxy(object):
             	            print('adding/changing lb parameters')
                             self.add_services_lb(service_update)
                         else:
-                            print('this service doesn\'t enable load balancing')
+                           print('this service doesn\'t enable load balancing')
                     else:
-        	        req = requests.get("http://192.168.100.32:8888/servers").json()
+        	        req = requests.get(url + '/servers').json()
         	        if service_update in req:
                             print('this service no longer enable load balancing')
         		    self.del_services_lb(service_update)
@@ -339,11 +361,11 @@ class GoBetweenProxy(object):
             lsnr.sendall(msg_encode({"action": "daemon_status"}))
             data = self.recv_message(lsnr)[0]
             if data is None:
-                print("unable to get data")
+                print('unable to get data')
                 return
             services = []
             for elem in data["monitor"]["services"]:
-                expr = r"^[0-9]+\."
+                expr = r"^[0-9]+\."      
                 if re.match(expr, elem) or (data["monitor"]["services"][elem]["avail"] != 'up'):
                     pass
                 else:
@@ -364,27 +386,31 @@ class GoBetweenProxy(object):
 
 
     def mainloop(self, lsnr):
-	messages = self.recv_message(lsnr, stream=True)
-	for message in messages:
-	    self.event_router(message)
+        messages = self.recv_message(lsnr, stream=True)
+        for message in messages:
+            self.event_router(message)
 		
 
     def main(self):
 	
-	try:
-	    with self.lsnr_socket() as lsnr:
-	        lsnr.sendall(msg_encode({"action": "events"}))
-	        if lsnr is None:
-		    raise Exception("lsnr socket not ready")
-	        while True:
-                    self.current_services()
-		    self.mainloop(lsnr)
-	except LsnrReset:
-	    time.sleep(1)
+        try:
+            with self.lsnr_socket() as lsnr:
+                lsnr.sendall(msg_encode({"action": "events"}))
+                if lsnr is None:
+                    raise Exception("lsnr socket not ready")
+                while True:
+                    global gobetween_status
+                    if gobetween_status['startTime'] != requests.get(url + '/').json()['startTime']: 
+                        self.current_services()
+                        gobetween_status = requests.get(url + '/').json()
+
+                    self.mainloop(lsnr)
+        except LsnrReset:
+            time.sleep(1)
 	
-	except Exception:
-	    traceback.print_exc()
-	    time.sleep(1)
+        except Exception:
+            traceback.print_exc()
+            time.sleep(1)
 
 	
 
