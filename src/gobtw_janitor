@@ -1,0 +1,568 @@
+#!/usr/bin/python3
+
+"""
+A daemon to maintain gobetween services in sync with OpenSVC
+cluster services.
+
+Services can set the following keywords in their env section
+to configure the corresponding gobetween server:
+
+* gobetween_ingress_bind
+* gobetween_ingress_protocol
+* gobetween_ingress_balance
+* gobetween_ingress_max_connections
+* gobetween_ingress_client_idle_timeout
+* gobetween_ingress_backend_idle_timeout
+* gobetween_ingress_backend_connection_timeout
+* gobetween_ingress_sni
+* gobetween_ingress_tls
+* gobetween_ingress_backends_tls
+* gobetween_ingress_udp
+* gobetween_ingress_access
+* gobetween_ingress_proxy_protocol
+* gobetween_ingress_discovery_failpolicy
+* gobetween_ingress_discovery_kind
+* gobetween_ingress_discovery_srv_dns_protocol
+* gobetween_ingress_discovery_srv_lookup_server
+* gobetween_ingress_discovery_srv_lookup_pattern
+* gobetween_ingress_discovery_interval
+* gobetween_ingress_discovery_timeout
+* gobetween_ingress_healthcheck_fails
+* gobetween_ingress_healthcheck_passes
+* gobetween_ingress_healthcheck_interval
+* gobetween_ingress_healthcheck_kind
+* gobetween_ingress_healthcheck_timeout
+
+"""
+from __future__ import print_function
+
+import traceback
+import contextlib
+import time
+import sys
+import os
+import json
+import socket
+import optparse
+import copy
+
+import requests
+
+HEADERS = {
+    "content-type": "application/json"
+}
+
+KEYWORD_PROXY = {
+    "gobetween_ingress_bind": "bind",
+    "gobetween_ingress_protocol": "protocol",
+    "gobetween_ingress_balance": "balance",
+    "gobetween_ingress_max_connections": "max_connections",
+    "gobetween_ingress_client_idle_timeout": "client_idle_timeout",
+    "gobetween_ingress_backend_idle_timeout": "backend_idle_timeout",
+    "gobetween_ingress_backend_connection_timeout": "backend_connection_timeout",
+    "gobetween_ingress_sni": "sni",
+    "gobetween_ingress_tls": "tls",
+    "gobetween_ingress_backends_tls": "backends_tls",
+    "gobetween_ingress_udp": "udp",
+    "gobetween_ingress_access": "access",
+    "gobetween_ingress_proxy_protocol": "proxy_protocol",
+    "gobetween_ingress_discovery_failpolicy": ["discovery", "failpolicy"],
+    "gobetween_ingress_discovery_kind": ["discovery", "kind"],
+    "gobetween_ingress_discovery_srv_dns_protocol": ["discovery", "srv_dns_protocol"],
+    "gobetween_ingress_discovery_srv_lookup_server": ["discovery", "srv_lookup_server"],
+    "gobetween_ingress_discovery_srv_lookup_pattern": ["discovery", "srv_lookup_pattern"],
+    "gobetween_ingress_discovery_interval": ["discovery", "interval"],
+    "gobetween_ingress_discovery_timeout": ["discovery", "timeout"],
+    "gobetween_ingress_healthcheck_fails": ["healthcheck", "fails"],
+    "gobetween_ingress_healthcheck_passes": ["healthcheck", "passes"],
+    "gobetween_ingress_healthcheck_interval": ["healthcheck", "interval"],
+    "gobetween_ingress_healthcheck_kind": ["healthcheck", "kind"],
+    "gobetween_ingress_healthcheck_timeout": ["healthcheck", "timeout"]
+}
+
+GOBETWEEN_DATA = {
+    "bind": None,
+    "protocol": "tcp",
+    "balance": "weight",
+    "max_connections": 0,
+    "client_idle_timeout": "0",
+    "backend_idle_timeout": "0",
+    "backend_connection_timeout": "0",
+    "sni": None,
+    "tls": None,
+    "backends_tls": None,
+    "udp": None,
+    "access": None,
+    "proxy_protocol": None,
+    "discovery": {
+        "failpolicy": "keeplast",
+        "kind": "srv",
+        "srv_dns_protocol": "tcp",
+        "srv_lookup_server": "",
+        "srv_lookup_pattern": "",
+        "interval": "0",
+        "timeout": "0"
+    },
+    "healthcheck": {
+        "fails": 1,
+        "passes": 1,
+        "interval": "2s",
+        "kind": "ping",
+        "timeout": "500ms"
+    }
+}
+
+PORT_RANGE_LOW = 1024
+PORT_RANGE_HIGH = 65535+1
+REQ_TIMEOUT = 1
+GOBTW_IP = "127.0.0.1"
+GOBTW_PORT = 8888
+
+class Error(Exception):
+    """
+    A known error handled by the daemon
+    """
+    pass
+
+class LsnrReset(Exception):
+    """
+    Signals a OpenSVC listener socket issue (timeout, refused, ...)
+    """
+    pass
+
+def bdecode(buff):
+    """
+    On python, convert bytes to string using utf-8 and ascii as a fallback
+    """
+    if buff is None:
+        return buff
+    if sys.version_info[0] < 3:
+        return buff
+    if isinstance(buff, str):
+        return buff
+    else:
+        return buff.decode("utf-8", errors="ignore")
+    return buff
+
+def msg_encode(data):
+    """
+    Prepare a structure for sending on the OpenSVC listener socket.
+    """
+    return (json.dumps(data)+'\0').encode()
+
+def msg_decode(message):
+    """
+    Decode a structure from a message received on the OpenSVC listener socket.
+    """
+    message = bdecode(message).rstrip("\0\x00")
+    if len(message) == 0:
+        return
+    return json.loads(message)
+
+def test_dict(dict1, dict2):
+    """
+    Return true if the dicts are not empty and have the same key/val in
+    the first two hierachy levels.
+    """
+    if (dict1 == {}) or (dict2 == {}):
+        print("dict empty")
+        return False
+    dict_to_del = dict2.copy()
+    for key, val in dict1.items():
+        if key in dict_to_del:
+            if val == dict_to_del[key]:
+                del dict_to_del[key]
+    return dict_to_del == {}
+
+class GoBetweenProxy(object):
+    """
+    The daemon class.
+    """
+    daemon_status_data = None
+
+    @contextlib.contextmanager
+    def lsnr_socket(self):
+        """
+        A context wrapper yield a socket to the OpenSVC listener,
+        taking care of the clean up.
+        """
+        if "OPENSVC_LSNR_SOCK" in os.environ:
+            lsnr_path = os.environ["OPENSVC_LSNR_SOCK"]
+        elif os.path.exists("/var/run/lsnr/lsnr.sock"):
+            lsnr_path = "/var/run/lsnr/lsnr.sock"
+        else:
+            lsnr_path = "/var/lib/opensvc/lsnr/lsnr.sock"
+
+        try:
+            lsnr = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            lsnr.settimeout(1)
+            lsnr.connect(lsnr_path)
+            yield lsnr
+        finally:
+            lsnr.close()
+
+    @staticmethod
+    def recv_message(sock, stream=False):
+        """
+        Receives a single or a stream of messages from the OpenSVC
+        listener. Return them as a list.
+        """
+        chunks = []
+        messages = []
+        sep = b"\x00"
+        while True:
+            try:
+                chunk = sock.recv(4096)
+            except socket.timeout:
+                break
+            if stream and chunk == b'':
+                # disconnect
+                raise LsnrReset
+            if not chunk or chunk == sep:
+                break
+            chunks.append(chunk)
+
+        if sys.version_info[0] >= 3:
+            data = b"".join(chunks)
+        else:
+            data = "".join(chunks)
+        if len(data) == 0:
+            return []
+        for message in data.split(sep):
+            message = msg_decode(message)
+            messages.append(message)
+        return messages
+
+    def gobtw_status(self):
+        """
+        Get the GoBetween daemon status from the rest API.
+        """
+        return requests.get(self.url + "/", timeout=self.req_timeout).json()
+
+    def gobtw_get_servers(self):
+        """
+        Get the GoBetween servers status from the Rest API.
+        """
+        data = requests.get(self.url + "/servers", timeout=self.req_timeout)
+        if data.status_code != 200:
+            raise Error("couldn't retrieve the data")
+        return data.json()
+
+    def url_service(self, svc):
+        """
+        Format and return the GoBetween Rest API url to the 'server'
+        object.
+        """
+        return "%s/servers/%s" % (self.url, svc)
+
+    def osvc_service_set_bind(self, svcname, val):
+        """
+        Submit to the OpenSVC listener a service configuration set action
+        to change the env.gobetween_ingress_bind value.
+        """
+        with self.lsnr_socket() as lsnr:
+            lsnr.sendall(msg_encode({
+                "action": "service_action",
+                "options": {
+                    "svcname": svcname,
+                    "cmd": ["set", "--kw=env.gobetween_ingress_bind=%s" % val]
+                }
+            }))
+
+    def osvc_service_config(self, svcname):
+        """
+        Request the OpenSVC listener for a service configuration.
+        """
+        with self.lsnr_socket() as lsnr:
+            lsnr.sendall(msg_encode({
+                "action": "get_service_config",
+                "options": {
+                    "svcname": svcname,
+                    "format": "json",
+                    "evaluate": True
+                }
+            }))
+            return self.recv_message(lsnr)[0]
+
+    def osvc_service_env_section(self, svcname):
+        return self.osvc_service_config(svcname)["env"]
+
+    @staticmethod
+    def check_mandatory_keys(svcname, data):
+        mandatory = None
+
+        if data["bind"] is None:
+            print("service '%s' mandatory key: BIND, missing in data" % svcname)
+            mandatory = True
+
+        if data["discovery"]["srv_lookup_server"] == "":
+            print("service '%s' mandatory key: SRV_LOOKUP_SERVER, missing in data" % svcname)
+            mandatory = True
+
+        if data['discovery']['srv_lookup_pattern'] == "":
+            print("service '%s' mandatory key: SRV_LOOKUP_PATTERN, missing in data" % svcname)
+            mandatory = True
+
+        if mandatory:
+            raise Error
+
+    @staticmethod
+    def get_used_ports(data):
+        ports = []
+        for elem in data:
+            ports.append(int(data[elem]["bind"].split(":")[-1]))
+        return ports
+
+    @staticmethod
+    def port_range():
+        return range(PORT_RANGE_LOW, PORT_RANGE_HIGH)
+
+    def add_services_lb(self, svcname):
+        url_service = self.url_service(svcname)
+        data = copy.deepcopy(GOBETWEEN_DATA)
+        for key, val in self.osvc_service_env_section(svcname).items():
+            if key not in KEYWORD_PROXY:
+                continue
+            if isinstance(KEYWORD_PROXY[key], list):
+                data[KEYWORD_PROXY[key][0]][KEYWORD_PROXY[key][1]] = val
+            else:
+                data[KEYWORD_PROXY[key]] = val
+
+        # test whether or not we should update the service conf in gobetween
+        current_data = self.gobtw_get_servers()
+
+        if svcname in current_data:
+            if test_dict(current_data[svcname], data):
+                print("service '%s' is already configured" % svcname)
+                return
+            else:
+                print("service '%s' delete gobtwn server for re-add" % svcname)
+                try:
+                    result = requests.delete(url_service, timeout=self.req_timeout)
+                    if result.status_code != 200:
+                        raise Error("couldn't delete current service configuration")
+                    del current_data[svcname]
+                except Exception:
+                    return
+
+        try:
+            self.check_mandatory_keys(svcname, data)
+        except Error:
+            return
+
+        # make sure you are binding on a free port
+        used_ports = self.get_used_ports(current_data)
+        addr, port = data["bind"].split(":")
+        port = int(port)
+
+        if port in used_ports:
+            print("service '%s' defined port '%d' is busy, assign a free port" % (svcname, port))
+            for port in self.port_range():
+                if port not in used_ports:
+                    break
+            data["bind"] = "%s:%d" % (addr, port)
+            self.osvc_service_set_bind(svcname, data["bind"])
+
+        print("service '%s' add gobtwn server" % svcname)
+        result = requests.post(url_service, data=json.dumps(data),
+                               headers=HEADERS, timeout=self.req_timeout)
+        if result.status_code != 200:
+            raise Error("failed to post %s: %s" % (url_service, result.status_code))
+
+    def del_services_lb(self, svcname):
+        print("service '%s' delete gobtwn server" % svcname)
+        url_service = self.url_service(svcname)
+        del_service = requests.delete(url_service, timeout=self.req_timeout)
+        if del_service.status_code != 200:
+            raise Error("couldn't delete the service configuration")
+
+    def parse_change(self, change):
+        change_len = len(change)
+        if change_len == 2:
+            key = change[0]
+            if len(key) == 3 and \
+               key[0] == "services" and \
+               key[1] == "status":
+                return key[2], "add"
+            elif len(key) == 4 and \
+               key[0] == "services" and \
+               key[1] == "config" and \
+               key[3] == "updated":
+                return key[2], "update"
+        elif change_len == 1:
+            key = change[0]
+            if len(key) == 3 and \
+               key[0] == "services" and \
+               key[1] == "status":
+                return key[2], "delete"
+        return None, None
+
+    @staticmethod
+    def service_needs_lb(config):
+        if "env" not in config:
+            return False
+        if "gobetween_ingress_target_lb" not in config["env"]:
+            return False
+        if config["env"]["gobetween_ingress_target_lb"] != "yes":
+            return False
+        return True
+
+    def event_router(self, data):
+        if data is None:
+            return
+        changes = data.get("data", {})
+        valid_changes = []
+        for change in changes:
+            svcname, evt = self.parse_change(change)
+            if evt is None and svcname is None:
+                continue
+            if evt is None or svcname is None:
+                print("unexpected event: service '%s' %s event" % (svcname, evt))
+                continue
+            valid_changes.append((svcname, evt))
+
+        if not valid_changes:
+            return
+
+        for svcname, evt in [elem for elem in valid_changes if elem[0] != "add"]:
+            self.do_action(svcname, evt)
+        self.osvc_daemon_status()
+        for svcname, evt in [elem for elem in valid_changes if elem[0] == "add"]:
+            self.do_action(svcname, evt)
+
+    def do_action(self, svcname, evt):
+        if self.is_scaler_slave(svcname):
+            print("ignore scaler slave '%s' %s event" % (svcname, evt))
+            return
+
+        print("service '%s' %s event" % (svcname, evt))
+
+        if evt == "add":
+            config = self.osvc_service_config(svcname)
+            if self.service_needs_lb(config):
+                self.add_services_lb(svcname)
+            else:
+                print("service '%s' doesn't enable load balancing" % svcname)
+        elif evt == "update":
+            config = self.osvc_service_config(svcname)
+            if self.service_needs_lb(config):
+                self.add_services_lb(svcname)
+            else:
+                result = requests.get(self.url + "/servers", timeout=self.req_timeout).json()
+                if svcname in result:
+                    print("service '%s' no longer enables load balancing" % svcname)
+                    self.del_services_lb(svcname)
+                else:
+                    print("service '%s' doesn't enable load balancing" % svcname)
+        elif evt == "delete":
+            self.del_services_lb(svcname)
+
+    def is_scaler_slave(self, svcname):
+        for ndata in self.daemon_status_data["monitor"]["nodes"].values():
+            if ndata is None:
+                continue
+            if svcname not in ndata.get("services", {}).get("status", {}):
+                continue
+            sdata = ndata["services"]["status"][svcname]
+            if sdata.get("scaler_slave"):
+                return True
+        return False
+
+    def osvc_daemon_status(self):
+        with self.lsnr_socket() as lsnr:
+            if lsnr is None:
+                raise Error("lsnr socket not ready")
+            lsnr.sendall(msg_encode({"action": "daemon_status"}))
+            data = self.recv_message(lsnr)[0]
+            if data is None:
+                print("unable to get opensvc daemon data")
+                return
+            self.daemon_status_data = data
+
+    def init_services(self):
+        self.osvc_daemon_status()
+        for svcname, sdata in self.daemon_status_data["monitor"]["services"].items():
+            if self.is_scaler_slave(svcname) or sdata["avail"] != "up":
+                continue
+            config = self.osvc_service_config(svcname)
+            if not self.service_needs_lb(config):
+                print("service '%s' doesn't enable load balancing" % svcname)
+                continue
+            self.add_services_lb(svcname)
+
+    def mainloop(self, lsnr):
+        messages = self.recv_message(lsnr, stream=True)
+        for message in messages:
+            self.event_router(message)
+
+    def set_options(self, **kwargs):
+        options_data = [
+            {
+                "kwarg": "gobtw_port",
+                "default": GOBTW_PORT,
+            },
+            {
+                "kwarg": "gobtw_addr",
+                "default": GOBTW_IP,
+            },
+            {
+                "kwarg": "req_timeout",
+                "default": REQ_TIMEOUT,
+            },
+        ]
+        for odata in options_data:
+            if kwargs[odata["kwarg"]] is not None:
+                setattr(self, odata["kwarg"], kwargs[odata["kwarg"]])
+            else:
+                setattr(self, odata["kwarg"], odata["default"])
+            print("init: %s = %s" % (odata["kwarg"], str(getattr(self, odata["kwarg"]))))
+        self.url = "http://%s:%d" % (self.gobtw_addr, self.gobtw_port)
+
+    def main(self, **kwargs):
+        self.set_options(**kwargs)
+        while True:
+            try:
+                self._main()
+            except (LsnrReset, Error) as exc:
+                print(exc)
+                time.sleep(1)
+            except KeyboardInterrupt:
+                print("keyboard interrupt")
+                break
+            except Exception:
+                traceback.print_exc()
+                time.sleep(1)
+
+    def _main(self):
+        last_gobtw_status = {}
+        with self.lsnr_socket() as lsnr:
+            lsnr.sendall(msg_encode({"action": "events"}))
+            if lsnr is None:
+                raise LsnrReset("lsnr socket not ready")
+            self.init_services()
+            while True:
+                try:
+                    new_gobtw_status = self.gobtw_status()
+                    if last_gobtw_status == {} or \
+                       new_gobtw_status["startTime"] != last_gobtw_status["startTime"]:
+                        last_gobtw_status = new_gobtw_status
+                        self.init_services()
+                except Exception as exc:
+                    print("get gobtw status error: %s" % str(exc), file=sys.stderr)
+                self.mainloop(lsnr)
+
+if __name__ == "__main__":
+    parser = optparse.OptionParser()
+    parser.add_option("-p", "--port", action="store",
+                      dest="gobtw_port", help="The GoBetween Rest API port. default %d" % GOBTW_PORT)
+    parser.add_option("-a", "--addr", action="store",
+                      dest="gobtw_addr", help="The GoBetween Rest API address. default %s" % GOBTW_IP)
+    parser.add_option("--req-timeout", action="store", type="int",
+                      dest="req_timeout", help="The timeout of GoBetween Rest API requests. default %d" % REQ_TIMEOUT)
+    options, _ = parser.parse_args()
+    options = vars(options)
+    try:
+        obj = GoBetweenProxy()
+        obj.main(**options)
+    except KeyboardInterrupt:
+        pass
