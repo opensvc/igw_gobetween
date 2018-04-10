@@ -1,4 +1,4 @@
-#!/usr/bin/python2.7
+#!/usr/bin/python
 
 
 from __future__ import print_function
@@ -10,7 +10,6 @@ import sys
 import os
 import re
 import json
-import random
 import socket
 import requests
 import traceback
@@ -82,8 +81,8 @@ GOBETWEEN_DATA =  {
 
 gobetween_ip = '192.168.100.32'
 gobetween_port = '8888'
-url = 'http://'+gobetween_ip+':'+gobetween_port
-gobetween_status = requests.get(url+'/').json()
+url = 'http://' + gobetween_ip + ':' + gobetween_port
+gobetween_status = requests.get(url + '/').json()
 
 
 class LsnrReset(Exception):
@@ -184,10 +183,10 @@ class GoBetweenProxy(object):
         except Exception:
             time.sleep(1)
             return
-        
+
 
     def add_services_lb(self, svc):
-	
+
         url_service = url + '/servers/' + svc
         data_change = GOBETWEEN_DATA.copy()
         with self.lsnr_socket() as lsnr:
@@ -206,7 +205,7 @@ class GoBetweenProxy(object):
 
         if svc in current_data:
             if test_dict(current_data[svc], data_change):
-                print('service already configured')
+                print('service (%s) already configured' %svc)
                 return
             else:
                 try:
@@ -216,27 +215,39 @@ class GoBetweenProxy(object):
                 except Exception:
                     time.sleep(1)
                     return
-                
+
         current_data2 = self.get_gobetween_data()
 
-	# mandatory key
-        try:
-            if data_change['bind'] is None:
-                raise ValueError('must fill this field')
-        except ValueError:
-            print('mandatory key missing in data')
+	# mandatory key        
+        mandatory = None
+
+        if data_change['bind'] is None:
+            print('mandatory key: BIND, missing in data')
+            mandatory = True
+
+        if data_change['discovery']['srv_lookup_server'] == '':
+            print('mandatory key: SRV_LOOKUP_SERVER, missing in data')
+            mandatory = True
+
+        if data_change['discovery']['srv_lookup_pattern'] == '':
+            print('mandatory key: SRV_LOOKUP_PATTERN, missing in data')
+            mandatory = True
+
+        if mandatory:
             return
 
-	# make sure u are binding on a free port
+
+
+        # make sure you are binding on a free port
         current_bind = []
         for elem in current_data2:
             current_bind.append(current_data2[elem]['bind'])
         port = []
         for bind in current_bind:
             port.append(int(bind.split(':')[1]))
-	
+
         if int(data_change['bind'].split(':')[1]) in port:
-            print('this port is busy, will bind a free port by default')
+            print('this port is (%d) busy, will bind a free port by default' %int(data_change['bind'].split(':')[1]))
             allowed_values = list(range(1024, 65535+1))
             for num in port:
                 if num in allowed_values:
@@ -244,8 +255,6 @@ class GoBetweenProxy(object):
             data_change['bind'] = data_change['bind'].split(':')[0] + ':' + str(allowed_values[0])	    
             with self.lsnr_socket() as lsnr:
                 lsnr.send(msg_encode({"action": "service_action", "options": {"svcname": svc, "cmd": ["set", "--kw=env.gobetween_ingress_bind="+ data_change['bind']]}}))
-
-        print(data_change)
 
         try:
             post_service = requests.post(url_service, data=json.dumps(data_change), headers=HEADERS)      
@@ -258,7 +267,7 @@ class GoBetweenProxy(object):
 
 
     def del_services_lb(self, svc):
-        
+
         url_service = url + '/servers/' + svc
         try:
             del_service = requests.delete(url_service)
@@ -280,10 +289,10 @@ class GoBetweenProxy(object):
             service_update = None
             for change in changes:
                 change_len = len(change)
-		
+
                 if change_len == 2:
                     key, val = change
-	
+
 		    if len(key) == 3 and \
                      key[0] == "services" and \
                      key[1] == "status":
@@ -294,7 +303,7 @@ class GoBetweenProxy(object):
                          else:
                              print('add service', svcname)
                              service = svcname
-	 
+
 		    if len(key) == 4 and \
 		     key[0] == "services" and \
 		     key[1] == "config" and \
@@ -316,38 +325,32 @@ class GoBetweenProxy(object):
 			 if del_service != None:
                              print("delete instance", svcname)
                              remove = True
-	
+
 
             if service != None:
                 with self.lsnr_socket() as lsnr:
                     lsnr.send(msg_encode({"action": "get_service_config", "options": {"svcname": service, "format": "json", "evaluate": True}}))    
                     config = self.recv_message(lsnr)[0]
-                    if config.has_key('env'): 
-                        if ('gobetween_ingress_target_lb' in config['env']) and (config['env']['gobetween_ingress_target_lb'] == 'yes'):
-                            self.add_services_lb(service)
-                        else:
-                            print('this service doesn\'t enable load balancing')
+                    if (config.has_key('env')) and ('gobetween_ingress_target_lb' in config['env']) and (config['env']['gobetween_ingress_target_lb'] == 'yes'):
+                        self.add_services_lb(service)
                     else:
-                        print('this service doesn\'t enable load balancing') 
+                        print('this service (%s) doesn\'t enable load balancing' %service) 
 
             elif service_update != None:
 	        with self.lsnr_socket() as lsnr:
                     lsnr.send(msg_encode({"action": "get_service_config", "options": {"svcname": service_update, "format": "json", "evaluate": True}}))
                     config = self.recv_message(lsnr)[0]
-                    if config.has_key('env'):
-                        if ('gobetween_ingress_target_lb' in config['env']) and (config['env']['gobetween_ingress_target_lb'] == 'yes'):
-            	            print('adding/changing lb parameters')
-                            self.add_services_lb(service_update)
-                        else:
-                           print('this service doesn\'t enable load balancing')
+                    if (config.has_key('env')) and ('gobetween_ingress_target_lb' in config['env']) and (config['env']['gobetween_ingress_target_lb'] == 'yes'):
+            	        print('adding/changing lb parameters of %s' %service_update)
+                        self.add_services_lb(service_update)
                     else:
         	        req = requests.get(url + '/servers').json()
         	        if service_update in req:
-                            print('this service no longer enable load balancing')
+                            print('this service (%s) no longer enable load balancing' %service_update)
         		    self.del_services_lb(service_update)
                         else:
-                            print('this service doesn\'t enable load balancing')
-                          
+                            print('this service (%s) doesn\'t enable load balancing' %service_update)
+
 	    elif remove:
 		self.del_services_lb(del_service)
 
@@ -375,13 +378,10 @@ class GoBetweenProxy(object):
             with self.lsnr_socket() as lsnr:
                 lsnr.send(msg_encode({"action": "get_service_config", "options": {"svcname": service, "format": "json", "evaluate": True}}))
                 config = self.recv_message(lsnr)[0]
-                if config.has_key('env'):
-                    if ('gobetween_ingress_target_lb' in config['env']) and (config['env']['gobetween_ingress_target_lb'] == 'yes'):
-                        self.add_services_lb(service)
-                    else:
-                        print('this service doesn\'t enable load balancing')
+                if (config.has_key('env')) and ('gobetween_ingress_target_lb' in config['env']) and (config['env']['gobetween_ingress_target_lb'] == 'yes'):
+                    self.add_services_lb(service)
                 else:
-                    print('this service doesn\'t enable load balancing')
+                    print('this service (%s) doesn\'t enable load balancing' %service)
 
 
 
@@ -389,15 +389,16 @@ class GoBetweenProxy(object):
         messages = self.recv_message(lsnr, stream=True)
         for message in messages:
             self.event_router(message)
-		
+
 
     def main(self):
-	
+
         try:
             with self.lsnr_socket() as lsnr:
                 lsnr.sendall(msg_encode({"action": "events"}))
                 if lsnr is None:
                     raise Exception("lsnr socket not ready")
+                self.current_services()
                 while True:
                     global gobetween_status
                     if gobetween_status['startTime'] != requests.get(url + '/').json()['startTime']: 
@@ -407,12 +408,12 @@ class GoBetweenProxy(object):
                     self.mainloop(lsnr)
         except LsnrReset:
             time.sleep(1)
-	
+
         except Exception:
             traceback.print_exc()
             time.sleep(1)
 
-	
+
 
 if __name__ == "__main__":
     try:
