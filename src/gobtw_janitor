@@ -7,31 +7,31 @@ cluster services.
 Services can set the following keywords in their env section
 to configure the corresponding gobetween server:
 
-* gobetween_ingress_bind
-* gobetween_ingress_protocol
-* gobetween_ingress_balance
-* gobetween_ingress_max_connections
-* gobetween_ingress_client_idle_timeout
-* gobetween_ingress_backend_idle_timeout
-* gobetween_ingress_backend_connection_timeout
-* gobetween_ingress_sni
-* gobetween_ingress_tls
-* gobetween_ingress_backends_tls
-* gobetween_ingress_udp
-* gobetween_ingress_access
-* gobetween_ingress_proxy_protocol
-* gobetween_ingress_discovery_failpolicy
-* gobetween_ingress_discovery_kind
-* gobetween_ingress_discovery_srv_dns_protocol
-* gobetween_ingress_discovery_srv_lookup_server
-* gobetween_ingress_discovery_srv_lookup_pattern
-* gobetween_ingress_discovery_interval
-* gobetween_ingress_discovery_timeout
-* gobetween_ingress_healthcheck_fails
-* gobetween_ingress_healthcheck_passes
-* gobetween_ingress_healthcheck_interval
-* gobetween_ingress_healthcheck_kind
-* gobetween_ingress_healthcheck_timeout
+* igw_gobtw_bind
+* igw_gobtw_protocol
+* igw_gobtw_balance
+* igw_gobtw_max_connections
+* igw_gobtw_client_idle_timeout
+* igw_gobtw_backend_idle_timeout
+* igw_gobtw_backend_connection_timeout
+* igw_gobtw_sni
+* igw_gobtw_tls
+* igw_gobtw_backends_tls
+* igw_gobtw_udp
+* igw_gobtw_access
+* igw_gobtw_proxy_protocol
+* igw_gobtw_discovery_failpolicy
+* igw_gobtw_discovery_kind
+* igw_gobtw_discovery_srv_dns_protocol
+* igw_gobtw_discovery_srv_lookup_server
+* igw_gobtw_discovery_srv_lookup_pattern
+* igw_gobtw_discovery_interval
+* igw_gobtw_discovery_timeout
+* igw_gobtw_healthcheck_fails
+* igw_gobtw_healthcheck_passes
+* igw_gobtw_healthcheck_interval
+* igw_gobtw_healthcheck_kind
+* igw_gobtw_healthcheck_timeout
 
 """
 from __future__ import print_function
@@ -53,31 +53,31 @@ HEADERS = {
 }
 
 KEYWORD_PROXY = {
-    "gobetween_ingress_bind": "bind",
-    "gobetween_ingress_protocol": "protocol",
-    "gobetween_ingress_balance": "balance",
-    "gobetween_ingress_max_connections": "max_connections",
-    "gobetween_ingress_client_idle_timeout": "client_idle_timeout",
-    "gobetween_ingress_backend_idle_timeout": "backend_idle_timeout",
-    "gobetween_ingress_backend_connection_timeout": "backend_connection_timeout",
-    "gobetween_ingress_sni": "sni",
-    "gobetween_ingress_tls": "tls",
-    "gobetween_ingress_backends_tls": "backends_tls",
-    "gobetween_ingress_udp": "udp",
-    "gobetween_ingress_access": "access",
-    "gobetween_ingress_proxy_protocol": "proxy_protocol",
-    "gobetween_ingress_discovery_failpolicy": ["discovery", "failpolicy"],
-    "gobetween_ingress_discovery_kind": ["discovery", "kind"],
-    "gobetween_ingress_discovery_srv_dns_protocol": ["discovery", "srv_dns_protocol"],
-    "gobetween_ingress_discovery_srv_lookup_server": ["discovery", "srv_lookup_server"],
-    "gobetween_ingress_discovery_srv_lookup_pattern": ["discovery", "srv_lookup_pattern"],
-    "gobetween_ingress_discovery_interval": ["discovery", "interval"],
-    "gobetween_ingress_discovery_timeout": ["discovery", "timeout"],
-    "gobetween_ingress_healthcheck_fails": ["healthcheck", "fails"],
-    "gobetween_ingress_healthcheck_passes": ["healthcheck", "passes"],
-    "gobetween_ingress_healthcheck_interval": ["healthcheck", "interval"],
-    "gobetween_ingress_healthcheck_kind": ["healthcheck", "kind"],
-    "gobetween_ingress_healthcheck_timeout": ["healthcheck", "timeout"]
+    "igw_gobtw_bind": "bind",
+    "igw_gobtw_protocol": "protocol",
+    "igw_gobtw_balance": "balance",
+    "igw_gobtw_max_connections": "max_connections",
+    "igw_gobtw_client_idle_timeout": "client_idle_timeout",
+    "igw_gobtw_backend_idle_timeout": "backend_idle_timeout",
+    "igw_gobtw_backend_connection_timeout": "backend_connection_timeout",
+    "igw_gobtw_sni": "sni",
+    "igw_gobtw_tls": "tls",
+    "igw_gobtw_backends_tls": "backends_tls",
+    "igw_gobtw_udp": "udp",
+    "igw_gobtw_access": "access",
+    "igw_gobtw_proxy_protocol": "proxy_protocol",
+    "igw_gobtw_discovery_failpolicy": ["discovery", "failpolicy"],
+    "igw_gobtw_discovery_kind": ["discovery", "kind"],
+    "igw_gobtw_discovery_srv_dns_protocol": ["discovery", "srv_dns_protocol"],
+    "igw_gobtw_discovery_srv_lookup_server": ["discovery", "srv_lookup_server"],
+    "igw_gobtw_discovery_srv_lookup_pattern": ["discovery", "srv_lookup_pattern"],
+    "igw_gobtw_discovery_interval": ["discovery", "interval"],
+    "igw_gobtw_discovery_timeout": ["discovery", "timeout"],
+    "igw_gobtw_healthcheck_fails": ["healthcheck", "fails"],
+    "igw_gobtw_healthcheck_passes": ["healthcheck", "passes"],
+    "igw_gobtw_healthcheck_interval": ["healthcheck", "interval"],
+    "igw_gobtw_healthcheck_kind": ["healthcheck", "kind"],
+    "igw_gobtw_healthcheck_timeout": ["healthcheck", "timeout"]
 }
 
 GOBETWEEN_DATA = {
@@ -117,6 +117,7 @@ PORT_RANGE_HIGH = 65535+1
 REQ_TIMEOUT = 1
 GOBTW_IP = "127.0.0.1"
 GOBTW_PORT = 8888
+DNS_PORT = '53'
 
 class Error(Exception):
     """
@@ -258,14 +259,15 @@ class GoBetweenProxy(object):
     def osvc_service_set_bind(self, svcname, val):
         """
         Submit to the OpenSVC listener a service configuration set action
-        to change the env.gobetween_ingress_bind value.
+        to change the env.igw_gobtw_bind value.
         """
         with self.lsnr_socket() as lsnr:
             lsnr.sendall(msg_encode({
                 "action": "service_action",
                 "options": {
                     "svcname": svcname,
-                    "cmd": ["set", "--kw=env.gobetween_ingress_bind=%s" % val]
+                    "cmd": ["set", "--kw=env.igw_gobtw_bind=%s" % val],
+                    "sync": True
                 }
             }))
 
@@ -285,10 +287,111 @@ class GoBetweenProxy(object):
             return self.recv_message(lsnr)[0]
 
     def osvc_service_env_section(self, svcname):
+        """
+        Return the OpenSVC "env" section of a given service.
+        """
         return self.osvc_service_config(svcname)["env"]
+
+    def osvc_cluster_config(self):
+        """
+        Request the OpenSVC listener for the cluster configuration.
+        """
+        with self.lsnr_socket() as lsnr:
+            lsnr.sendall(msg_encode({
+                "action": "get_node_config",
+                "options": {
+                    "format": "json",
+                    "evaluate": True
+                }
+            }))
+            return self.recv_message(lsnr)[0]
+
+    def get_dns(self):
+        """
+        Get the ip addresses the DNS are listening on.
+        """
+        return self.osvc_cluster_config()['cluster']['dns'].split(" ")
+
+    def get_dns_available(self):
+        """
+        Get the available DNS.
+        """
+        dns = self.get_dns()
+        fqdn = ""
+        for elem in dns:
+            try:
+                fqdn = socket.gethostbyaddr(elem)
+            except socket.herror:
+                continue
+            if fqdn:
+                break
+        if not fqdn:
+            print("no dns available")
+        else:
+            return fqdn
+
+    def get_gobtw_srv_lookup_server(self):
+        """
+        Return the first DNS available.
+        """
+        if not self.get_dns_available():
+            return
+        return self.get_dns_available()[2][0]
+
+    def get_service_expose(self, svcname):
+        """
+        Get the list of exposed parameters of a service.
+        """
+        expose = []
+        for nodes in self.daemon_status_data["monitor"]["nodes"].keys():
+            if "scaler_slaves" in self.daemon_status_data["monitor"]["nodes"][nodes]["services"]["status"][svcname]:
+                slaves = self.daemon_status_data["monitor"]["nodes"][nodes]["services"]["status"][svcname]["scaler_slaves"]
+                service_resources = self.daemon_status_data["monitor"]["nodes"][nodes]["services"]["status"][slaves[0]]["resources"]
+            else:
+                service_resources = self.daemon_status_data["monitor"]["nodes"][nodes]["services"]["status"][svcname]["resources"]
+            for key in sorted(service_resources.keys()):
+                if key.startswith("ip") and "expose" in service_resources[key]["info"]:
+                    for port in service_resources[key]["info"]["expose"]:
+                        if (port, key) in expose:
+                            pass
+                        else:
+                            expose.append((port, key))
+        return expose
+
+    def get_service_app(self, svcname):
+        """
+        Get the name of a service's app.
+        """
+        for nodes in self.daemon_status_data["monitor"]["nodes"].keys():
+            app = self.daemon_status_data["monitor"]["nodes"][nodes]["services"]["status"][svcname]["app"]
+        return app
+
+    def get_cluster(self):
+        """
+        Return the clustername.
+        """
+        return self.daemon_status_data["cluster"]["name"]
+
+    def get_gobtw_srv_lookup_pattern(self, svcname):
+        """
+        Return a list of SRV records.
+        """
+        srv_lookup_pattern = []
+        if not self.get_service_expose(svcname) or not self.get_service_app(svcname) or not self.get_cluster():
+            return
+        else:
+            for i in range(len(self.get_service_expose(svcname))):
+                expose, key = self.get_service_expose(svcname)[i]
+                service = socket.getservbyport(int(expose.split("/")[0]), expose.split("/")[1])
+                protocol = expose.split("/")[1]
+                srv_lookup_pattern.append("_%s._%s.%s.%s.%s.svc.%s" % (service, protocol, key, svcname, self.get_service_app(svcname), self.get_cluster()))
+        return srv_lookup_pattern
 
     @staticmethod
     def check_mandatory_keys(svcname, data):
+        """
+        Check that the mandatory keys are configured, if not raise an error.
+        """
         mandatory = None
 
         if data["bind"] is None:
@@ -299,7 +402,7 @@ class GoBetweenProxy(object):
             print("service '%s' mandatory key: SRV_LOOKUP_SERVER, missing in data" % svcname)
             mandatory = True
 
-        if data['discovery']['srv_lookup_pattern'] == "":
+        if data["discovery"]["srv_lookup_pattern"] == "":
             print("service '%s' mandatory key: SRV_LOOKUP_PATTERN, missing in data" % svcname)
             mandatory = True
 
@@ -308,68 +411,123 @@ class GoBetweenProxy(object):
 
     @staticmethod
     def get_used_ports(data):
+        """
+        Return the ports already used by the configured services.
+        """
         ports = []
         for elem in data:
-            ports.append(int(data[elem]["bind"].split(":")[-1]))
+            bind = data[elem]["bind"].split(" ")
+            for elem2 in bind:
+                port = int(elem2.split(":")[-1])
+                ports.append(port)
         return ports
 
     @staticmethod
     def port_range():
+        """
+        Returns the list of usable ports.
+        """
         return range(PORT_RANGE_LOW, PORT_RANGE_HIGH)
 
-    def add_services_lb(self, svcname):
-        url_service = self.url_service(svcname)
-        data = copy.deepcopy(GOBETWEEN_DATA)
-        for key, val in self.osvc_service_env_section(svcname).items():
-            if key not in KEYWORD_PROXY:
-                continue
-            if isinstance(KEYWORD_PROXY[key], list):
-                data[KEYWORD_PROXY[key][0]][KEYWORD_PROXY[key][1]] = val
-            else:
-                data[KEYWORD_PROXY[key]] = val
 
-        # test whether or not we should update the service conf in gobetween
-        current_data = self.gobtw_get_servers()
 
-        if svcname in current_data:
-            if test_dict(current_data[svcname], data):
-                print("service '%s' is already configured" % svcname)
+    def add_services_lb(self, svcname, dns_port=DNS_PORT):
+        """
+        Add or update a service to the GoBetween configuration through API Rest.
+        """
+        number_expose = 0
+        for elem in self.get_gobtw_srv_lookup_pattern(svcname):
+            actual_bind = []
+            server = "%s.%s_%s" % (elem.split(".")[0], elem.split(".")[2].replace("#", ""), svcname)
+            url_service = self.url_service(server)
+            data = copy.deepcopy(GOBETWEEN_DATA)
+            data["bind"] = "0.0.0.0:*"
+            actual_bind.append(data["bind"])
+            char = elem.split(".")
+            del char[2]
+            elem = ".".join(char)
+            data["discovery"]["srv_lookup_pattern"] = elem
+            if "dns_port" in self.osvc_service_env_section(svcname):
+                dns_port = self.osvc_service_env_section(svcname)["dns_port"]
+            data["discovery"]["srv_lookup_server"] = "%s:%s" % (self.get_gobtw_srv_lookup_server(), dns_port)
+            for key, val in self.osvc_service_env_section(svcname).items():
+                if key not in KEYWORD_PROXY:
+                    continue
+                if isinstance(KEYWORD_PROXY[key], list):
+                    data[KEYWORD_PROXY[key][0]][KEYWORD_PROXY[key][1]] = val
+                if key == "igw_gobtw_bind":
+                    try:
+                        data[KEYWORD_PROXY[key]] = val.split(" ")[number_expose]
+                        actual_bind = val.split(" ")
+                    except IndexError:
+                        print("missing bind in '%s 'env sections, adding one by default" % svcname)
+                        actual_bind = val.split(" ")
+                        actual_bind.append(data["bind"])
+                else:
+                    data[KEYWORD_PROXY[key]] = val
+            # test whether or not we should update the service conf in gobetween
+
+            current_data = self.gobtw_get_servers()
+
+            if server in current_data:
+                if test_dict(current_data[server], data):
+                    print("service '%s' is already configured" % server)
+                    number_expose += 1
+                    continue
+                else:
+                    print("service '%s' delete gobtwn server for re-add" % server)
+                    try:
+                        result = requests.delete(url_service, timeout=self.req_timeout)
+                        if result.status_code != 200:
+                            raise Error("couldn't delete current service configuration")
+                        del current_data[server]
+                    except Exception:
+                        return
+
+            try:
+                self.check_mandatory_keys(server, data)
+            except Error:
                 return
+
+            # make sure you are binding on a free port or auto alloc if no port configured
+            used_ports = self.get_used_ports(current_data)
+            if "*" in data["bind"]:
+                addr = data["bind"].split(":")[0]
+                port = None
+                for port in self.port_range():
+                    if port not in used_ports:
+                        break
+                data["bind"] = "%s:%d" % (addr, port)
+                actual_bind[number_expose] = data["bind"]
+                self.osvc_service_set_bind(svcname, " ".join(actual_bind))
+                time.sleep(10)
+
+
             else:
-                print("service '%s' delete gobtwn server for re-add" % svcname)
-                try:
-                    result = requests.delete(url_service, timeout=self.req_timeout)
-                    if result.status_code != 200:
-                        raise Error("couldn't delete current service configuration")
-                    del current_data[svcname]
-                except Exception:
-                    return
+                addr, port = data["bind"].split(":")
+                port = int(port)
+                if port in used_ports:
+                    print("service '%s' defined port '%d' is busy, assign a free port" % (server, port))
+                    for port in self.port_range():
+                        if port not in used_ports:
+                            break
+                    data["bind"] = "%s:%d" % (addr, port)
+                    actual_bind[number_expose] = data["bind"]
+                    self.osvc_service_set_bind(svcname, " ".join(actual_bind))
+                    time.sleep(10)
 
-        try:
-            self.check_mandatory_keys(svcname, data)
-        except Error:
-            return
+            number_expose += 1
+            print("service '%s' add gobtwn server" % server)
+            result = requests.post(url_service, data=json.dumps(data),
+                                   headers=HEADERS, timeout=self.req_timeout)
+            if result.status_code != 200:
+                raise Error("failed to post %s: %s" % (url_service, result.status_code))
 
-        # make sure you are binding on a free port
-        used_ports = self.get_used_ports(current_data)
-        addr, port = data["bind"].split(":")
-        port = int(port)
-
-        if port in used_ports:
-            print("service '%s' defined port '%d' is busy, assign a free port" % (svcname, port))
-            for port in self.port_range():
-                if port not in used_ports:
-                    break
-            data["bind"] = "%s:%d" % (addr, port)
-            self.osvc_service_set_bind(svcname, data["bind"])
-
-        print("service '%s' add gobtwn server" % svcname)
-        result = requests.post(url_service, data=json.dumps(data),
-                               headers=HEADERS, timeout=self.req_timeout)
-        if result.status_code != 200:
-            raise Error("failed to post %s: %s" % (url_service, result.status_code))
 
     def del_services_lb(self, svcname):
+        """
+        Delete a service to the GoBetween configuration through API Rest.
+        """
         print("service '%s' delete gobtwn server" % svcname)
         url_service = self.url_service(svcname)
         del_service = requests.delete(url_service, timeout=self.req_timeout)
@@ -377,6 +535,9 @@ class GoBetweenProxy(object):
             raise Error("couldn't delete the service configuration")
 
     def parse_change(self, change):
+        """
+        Fetch any changes in OpenSVC services through the listener.
+        """
         change_len = len(change)
         if change_len == 2:
             key = change[0]
@@ -399,15 +560,21 @@ class GoBetweenProxy(object):
 
     @staticmethod
     def service_needs_lb(config):
+        """
+        Return True whether a service needs load balancing.
+        """
         if "env" not in config:
             return False
-        if "gobetween_ingress_target_lb" not in config["env"]:
+        if "igw_gobtw_target_lb" not in config["env"]:
             return False
-        if config["env"]["gobetween_ingress_target_lb"] != "yes":
+        if config["env"]["igw_gobtw_target_lb"] != "yes":
             return False
         return True
 
     def event_router(self, data):
+        """
+        Trigger the action when it's required.
+        """
         if data is None:
             return
         changes = data.get("data", {})
@@ -431,6 +598,9 @@ class GoBetweenProxy(object):
             self.do_action(svcname, evt)
 
     def do_action(self, svcname, evt):
+        """
+        Do a peculiar action in compliance with the corresponding event.
+        """
         if self.is_scaler_slave(svcname):
             print("ignore scaler slave '%s' %s event" % (svcname, evt))
             return
@@ -458,6 +628,9 @@ class GoBetweenProxy(object):
             self.del_services_lb(svcname)
 
     def is_scaler_slave(self, svcname):
+        """
+        Return True whether a service is a scaler slave.
+        """
         for ndata in self.daemon_status_data["monitor"]["nodes"].values():
             if ndata is None:
                 continue
@@ -469,6 +642,9 @@ class GoBetweenProxy(object):
         return False
 
     def osvc_daemon_status(self):
+        """
+        Request the OpenSVC listener to get the daemon status.
+        """
         with self.lsnr_socket() as lsnr:
             if lsnr is None:
                 raise Error("lsnr socket not ready")
@@ -480,6 +656,9 @@ class GoBetweenProxy(object):
             self.daemon_status_data = data
 
     def init_services(self):
+        """
+        Initialise service configuration in GoBetween.
+        """
         self.osvc_daemon_status()
         for svcname, sdata in self.daemon_status_data["monitor"]["services"].items():
             if self.is_scaler_slave(svcname) or sdata["avail"] != "up":
@@ -491,11 +670,17 @@ class GoBetweenProxy(object):
             self.add_services_lb(svcname)
 
     def mainloop(self, lsnr):
+        """
+        Mainloop where we listen to the server events.
+        """
         messages = self.recv_message(lsnr, stream=True)
         for message in messages:
             self.event_router(message)
 
     def set_options(self, **kwargs):
+        """
+        Parser for command line options.
+        """
         options_data = [
             {
                 "kwarg": "gobtw_port",
@@ -519,6 +704,9 @@ class GoBetweenProxy(object):
         self.url = "http://%s:%d" % (self.gobtw_addr, self.gobtw_port)
 
     def main(self, **kwargs):
+        """
+        Main function.
+        """
         self.set_options(**kwargs)
         while True:
             try:
@@ -534,6 +722,9 @@ class GoBetweenProxy(object):
                 time.sleep(1)
 
     def _main(self):
+        """
+        Infinite loop where we use the event_router() function.
+        """
         last_gobtw_status = {}
         with self.lsnr_socket() as lsnr:
             lsnr.sendall(msg_encode({"action": "events"}))
