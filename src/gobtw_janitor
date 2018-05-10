@@ -370,7 +370,7 @@ class GoBetweenProxy(object):
         """
         Return the clustername.
         """
-        return self.daemon_status_data["cluster"]["name"]
+        return self.daemon_status_data["cluster"]["name"].rstrip(".")
 
     def get_gobtw_srv_lookup_pattern(self, svcname):
         """
@@ -384,7 +384,7 @@ class GoBetweenProxy(object):
                 expose, key = self.get_service_expose(svcname)[i]
                 service = socket.getservbyport(int(expose.split("/")[0]), expose.split("/")[1])
                 protocol = expose.split("/")[1]
-                srv_lookup_pattern.append("_%s._%s.%s.%s.%s.svc.%s" % (service, protocol, key, svcname, self.get_service_app(svcname), self.get_cluster()))
+                srv_lookup_pattern.append("_%s._%s.%s.%s.%s.svc.%s." % (service, protocol, key, svcname, self.get_service_app(svcname), self.get_cluster()))
         return srv_lookup_pattern
 
     @staticmethod
