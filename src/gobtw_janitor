@@ -7,6 +7,7 @@ cluster services.
 Services can set the following keywords in their env section
 to configure the corresponding gobetween server:
 
+* igw_gobtw_target_lb
 * igw_gobtw_bind
 * igw_gobtw_protocol
 * igw_gobtw_balance
@@ -563,13 +564,10 @@ class GoBetweenProxy(object):
         """
         Return True whether a service needs load balancing.
         """
-        if "env" not in config:
-            return False
-        if "igw_gobtw_target_lb" not in config["env"]:
-            return False
-        if config["env"]["igw_gobtw_target_lb"] != "yes":
-            return False
-        return True
+        target = config.get("env", {}).get("igw_gobtw_target_lb", "").lower()
+        if target == "yes" or target == socket.gethostname().lower():
+            return True
+        return False
 
     def event_router(self, data):
         """
