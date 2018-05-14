@@ -343,19 +343,17 @@ class GoBetweenProxy(object):
         Get the list of exposed parameters of a service.
         """
         expose = []
-        for nodes in self.daemon_status_data["monitor"]["nodes"].keys():
-            if "scaler_slaves" in self.daemon_status_data["monitor"]["nodes"][nodes]["services"]["status"][svcname]:
-                slaves = self.daemon_status_data["monitor"]["nodes"][nodes]["services"]["status"][svcname]["scaler_slaves"]
-                service_resources = self.daemon_status_data["monitor"]["nodes"][nodes]["services"]["status"][slaves[0]]["resources"]
+        env = self.osvc_service_env_section(svcname)["igw_gobtw_bind"]
+        bind = env.split(" ")
+        for elem in bind:
+            if "-" not in elem:
+                port = elem
             else:
-                service_resources = self.daemon_status_data["monitor"]["nodes"][nodes]["services"]["status"][svcname]["resources"]
-            for key in sorted(service_resources.keys()):
-                if key.startswith("ip") and "expose" in service_resources[key]["info"]:
-                    for port in service_resources[key]["info"]["expose"]:
-                        if (port, key) in expose:
-                            pass
-                        else:
-                            expose.append((port, key))
+                port = elem.split("-")[0]
+            if port in expose:
+                pass
+            else:
+                expose.append(port)
         return expose
 
     def get_service_app(self, svcname):
@@ -381,10 +379,10 @@ class GoBetweenProxy(object):
             return
         else:
             for i in range(len(self.get_service_expose(svcname))):
-                expose, key = self.get_service_expose(svcname)[i]
+                expose = self.get_service_expose(svcname)[i]
                 service = socket.getservbyport(int(expose.split("/")[0]), expose.split("/")[1])
                 protocol = expose.split("/")[1]
-                srv_lookup_pattern.append("_%s._%s.%s.%s.%s.svc.%s" % (service, protocol, key, svcname, self.get_service_app(svcname), self.get_cluster()))
+                srv_lookup_pattern.append("_%s._%s.%s.%s.svc.%s" % (service, protocol, svcname, self.get_service_app(svcname), self.get_cluster()))
         return srv_lookup_pattern
 
     @staticmethod
@@ -429,24 +427,20 @@ class GoBetweenProxy(object):
         """
         return range(PORT_RANGE_LOW, PORT_RANGE_HIGH)
 
-
-
     def add_services_lb(self, svcname, dns_port=DNS_PORT):
         """
         Add or update a service to the GoBetween configuration through API Rest.
         """
-        number_expose = 0
-        for elem in self.get_gobtw_srv_lookup_pattern(svcname):
-            actual_bind = []
-            server = "%s.%s_%s" % (elem.split(".")[0], elem.split(".")[2].replace("#", ""), svcname)
+
+        for srv_records in self.get_gobtw_srv_lookup_pattern(svcname):
+            current_igw_bind = []
+            server = "%s_%s" % (srv_records.split(".")[0], svcname)
             url_service = self.url_service(server)
+            protocol = srv_records.split(".")[1][1:]
+            serv = socket.getservbyname(srv_records.split(".")[0][1:], protocol)
+            seek = "%d/%s" % (serv, protocol)
             data = copy.deepcopy(GOBETWEEN_DATA)
-            data["bind"] = "0.0.0.0:*"
-            actual_bind.append(data["bind"])
-            char = elem.split(".")
-            del char[2]
-            elem = ".".join(char)
-            data["discovery"]["srv_lookup_pattern"] = elem
+            data["discovery"]["srv_lookup_pattern"] = srv_records
             if "dns_port" in self.osvc_service_env_section(svcname):
                 dns_port = self.osvc_service_env_section(svcname)["dns_port"]
             data["discovery"]["srv_lookup_server"] = "%s:%s" % (self.get_gobtw_srv_lookup_server(), dns_port)
@@ -456,13 +450,15 @@ class GoBetweenProxy(object):
                 if isinstance(KEYWORD_PROXY[key], list):
                     data[KEYWORD_PROXY[key][0]][KEYWORD_PROXY[key][1]] = val
                 if key == "igw_gobtw_bind":
-                    try:
-                        data[KEYWORD_PROXY[key]] = val.split(" ")[number_expose]
-                        actual_bind = val.split(" ")
-                    except IndexError:
-                        print("missing bind in '%s 'env sections, adding one by default" % svcname)
-                        actual_bind = val.split(" ")
-                        actual_bind.append(data["bind"])
+                    current_igw_bind = val.split(" ")
+                    binding = val.split(" ")
+                    for elem in binding:
+                        if seek in elem:
+                            if "-" not in elem:
+                                print("service '%s' addr not filled, binding one by default" % server)
+                                data[KEYWORD_PROXY[key]] = "0.0.0.0:*"
+                            else:
+                                data[KEYWORD_PROXY[key]] = elem.split("-")[1]
                 else:
                     data[KEYWORD_PROXY[key]] = val
             # test whether or not we should update the service conf in gobetween
@@ -472,7 +468,6 @@ class GoBetweenProxy(object):
             if server in current_data:
                 if test_dict(current_data[server], data):
                     print("service '%s' is already configured" % server)
-                    number_expose += 1
                     continue
                 else:
                     print("service '%s' delete gobtwn server for re-add" % server)
@@ -498,9 +493,17 @@ class GoBetweenProxy(object):
                     if port not in used_ports:
                         break
                 data["bind"] = "%s:%d" % (addr, port)
-                actual_bind[number_expose] = data["bind"]
-                self.osvc_service_set_bind(svcname, " ".join(actual_bind))
-                time.sleep(10)
+                for elem in current_igw_bind:
+                    if seek in elem:
+                        if "-" not in elem:
+                            new_elem = elem + "-" + data["bind"]
+                            current_igw_bind[current_igw_bind.index(elem)] = new_elem
+                        else:
+                            new_elem = elem.replace(elem.split("-")[1], data["bind"])
+                            current_igw_bind[current_igw_bind.index(elem)] = new_elem
+                set_env = " ".join(current_igw_bind)
+                self.osvc_service_set_bind(svcname, set_env)
+                time.sleep(1)
 
 
             else:
@@ -512,11 +515,18 @@ class GoBetweenProxy(object):
                         if port not in used_ports:
                             break
                     data["bind"] = "%s:%d" % (addr, port)
-                    actual_bind[number_expose] = data["bind"]
-                    self.osvc_service_set_bind(svcname, " ".join(actual_bind))
-                    time.sleep(10)
+                    for elem in current_igw_bind:
+                        if seek in elem:
+                            if "-" not in elem:
+                                new_elem = elem + "-" + data["bind"]
+                                current_igw_bind[current_igw_bind.index(elem)] = new_elem
+                            else:
+                                new_elem = elem.replace(elem.split("-")[1], data["bind"])
+                                current_igw_bind[current_igw_bind.index(elem)] = new_elem
+                    set_env = " ".join(current_igw_bind)
+                    self.osvc_service_set_bind(svcname, set_env)
+                    time.sleep(1)
 
-            number_expose += 1
             print("service '%s' add gobtwn server" % server)
             result = requests.post(url_service, data=json.dumps(data),
                                    headers=HEADERS, timeout=self.req_timeout)
@@ -534,7 +544,22 @@ class GoBetweenProxy(object):
         if del_service.status_code != 200:
             raise Error("couldn't delete the service configuration")
 
-    def parse_change(self, change):
+    def gobtw_current_servers(self, svcname):
+        """
+        Deleting services whether it's necessary in order to be in sync with the OpenSVC configuration file.
+        """
+        current_servers = []
+        for elem in self.get_gobtw_srv_lookup_pattern(svcname):
+            server = "%s_%s" % (elem.split(".")[0], svcname)
+            current_servers.append(server)
+        gobtw_servers = self.gobtw_get_servers()
+        for serv in gobtw_servers:
+            if serv not in current_servers:
+                print("service '%s' no longer exists, deleting it" % serv)
+                self.del_services_lb(serv)
+
+    @staticmethod
+    def parse_change(change):
         """
         Fetch any changes in OpenSVC services through the listener.
         """
@@ -565,9 +590,9 @@ class GoBetweenProxy(object):
         """
         if "env" not in config:
             return False
-        if "igw_gobtw_target_lb" not in config["env"]:
+        if "igw_gobtw_bind" not in config["env"]:
             return False
-        if config["env"]["igw_gobtw_target_lb"] != "yes":
+        if not config["env"]["igw_gobtw_bind"]:
             return False
         return True
 
@@ -617,6 +642,7 @@ class GoBetweenProxy(object):
             config = self.osvc_service_config(svcname)
             if self.service_needs_lb(config):
                 self.add_services_lb(svcname)
+                self.gobtw_current_servers(svcname)
             else:
                 result = requests.get(self.url + "/servers", timeout=self.req_timeout).json()
                 if svcname in result:
