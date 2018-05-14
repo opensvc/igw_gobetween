@@ -382,11 +382,7 @@ class GoBetweenProxy(object):
                 expose = self.get_service_expose(svcname)[i]
                 service = socket.getservbyport(int(expose.split("/")[0]), expose.split("/")[1])
                 protocol = expose.split("/")[1]
-<<<<<<< HEAD
-                srv_lookup_pattern.append("_%s._%s.%s.%s.svc.%s" % (service, protocol, svcname, self.get_service_app(svcname), self.get_cluster()))
-=======
-                srv_lookup_pattern.append("_%s._%s.%s.%s.%s.svc.%s." % (service, protocol, key, svcname, self.get_service_app(svcname), self.get_cluster()))
->>>>>>> 8cce97de85004f2985ca94c63a208c30e9e78549
+                srv_lookup_pattern.append("_%s._%s.%s.%s.svc.%s." % (service, protocol, svcname, self.get_service_app(svcname), self.get_cluster()))
         return srv_lookup_pattern
 
     @staticmethod
