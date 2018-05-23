@@ -561,6 +561,8 @@ class GoBetweenProxy(object):
             current_servers.append(server)
         gobtw_servers = self.gobtw_get_servers()
         for serv in gobtw_servers:
+            if not re.match("_[0-9]+_"+svcname, serv):
+                continue
             if serv not in current_servers:
                 print("service '%s' no longer exists, deleting it" % serv)
                 self.del_services_lb(serv)
