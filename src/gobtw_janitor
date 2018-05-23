@@ -590,10 +590,10 @@ class GoBetweenProxy(object):
         """
         Return True whether a service needs load balancing.
         """
-        target = config.get("env", {}).get("igw_gobtw_target_lb", []).lower().split()
+        target = config.get("env", {}).get("igw_gobtw_target_lb", "").lower().split()
         if target and HOSTNAME not in target:
             return False
-        if not config.get("env", {}).get("igw_gobtw_bind", []):
+        if not config.get("env", {}).get("igw_gobtw_bind"):
             return False
         return True
 
