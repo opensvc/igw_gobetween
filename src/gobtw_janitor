@@ -344,18 +344,26 @@ class GoBetweenProxy(object):
         """
         Get the list of exposed parameters of a service.
         """
-        expose = []
-        env = self.osvc_service_env_section(svcname)["igw_gobtw_bind"]
-        bind = env.split(" ")
-        for elem in bind:
-            if "-" not in elem:
-                port = elem
-            else:
-                port = elem.split("-")[0]
-            if port in expose:
-                pass
-            else:
-                expose.append(port)
+        expose = {}
+        binds = self.osvc_service_env_section(svcname)["igw_gobtw_bind"].split()
+
+        # example binds:
+        # - 8080/tcp
+        # - 8005/tcp-0.0.0.0:1105
+
+        for bind in binds:
+            try:
+                back, front = bind.split("-")
+            except ValueError:
+                back = bind
+                front = None
+            try:
+                port, protocol = back.split("/")
+                port = int(port)
+            except ValueError:
+                print("service %s misformatted bind: %s" % (svcname, bind))
+                continue
+            expose[(port, protocol)] = front
         return expose
 
     def get_service_app(self, svcname):
@@ -377,14 +385,11 @@ class GoBetweenProxy(object):
         Return a list of SRV records.
         """
         srv_lookup_pattern = []
-        if not self.get_service_expose(svcname) or not self.get_service_app(svcname) or not self.get_cluster():
+        expose = self.get_service_expose(svcname)
+        if not expose or not self.get_service_app(svcname) or not self.get_cluster():
             return
-        else:
-            for i in range(len(self.get_service_expose(svcname))):
-                expose = self.get_service_expose(svcname)[i]
-                service = socket.getservbyport(int(expose.split("/")[0]), expose.split("/")[1])
-                protocol = expose.split("/")[1]
-                srv_lookup_pattern.append("_%s._%s.%s.%s.svc.%s." % (service, protocol, svcname, self.get_service_app(svcname), self.get_cluster()))
+        for port, protocol in expose:
+            srv_lookup_pattern.append("_%d._%s.%s.%s.svc.%s." % (port, protocol, svcname, self.get_service_app(svcname), self.get_cluster()))
         return srv_lookup_pattern
 
     @staticmethod
@@ -439,8 +444,8 @@ class GoBetweenProxy(object):
             server = "%s_%s" % (srv_records.split(".")[0], svcname)
             url_service = self.url_service(server)
             protocol = srv_records.split(".")[1][1:]
-            serv = socket.getservbyname(srv_records.split(".")[0][1:], protocol)
-            seek = "%d/%s" % (serv, protocol)
+            port = int(srv_records.split(".")[0][1:])
+            seek = "%d/%s" % (port, protocol)
             data = copy.deepcopy(GOBETWEEN_DATA)
             data["discovery"]["srv_lookup_pattern"] = srv_records
             if "dns_port" in self.osvc_service_env_section(svcname):
