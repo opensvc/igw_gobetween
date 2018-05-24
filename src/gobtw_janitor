@@ -46,6 +46,7 @@ import json
 import socket
 import optparse
 import copy
+import re
 
 import requests
 
