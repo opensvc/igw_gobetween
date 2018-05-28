@@ -541,16 +541,21 @@ class GoBetweenProxy(object):
             if result.status_code != 200:
                 raise Error("failed to post %s: %s" % (url_service, result.status_code))
 
+    def del_gobtw(self, svcname):
+        url_service = self.url_service(svcname)
+        del_service = requests.delete(url_service, timeout=self.req_timeout)
+        if del_service.status_code != 200:
+            raise Error("couldn't delete the service configuration")
 
     def del_services_lb(self, svcname):
         """
         Delete a service to the GoBetween configuration through API Rest.
         """
         print("service '%s' delete gobtwn server" % svcname)
-        url_service = self.url_service(svcname)
-        del_service = requests.delete(url_service, timeout=self.req_timeout)
-        if del_service.status_code != 200:
-            raise Error("couldn't delete the service configuration")
+        gobtw_servers = self.gobtw_get_servers()
+        for serv in gobtw_servers:
+            if re.match("_[0-9]+_"+svcname, serv):
+                self.del_gobtw(serv)
 
     def gobtw_current_servers(self, svcname):
         """
@@ -564,9 +569,9 @@ class GoBetweenProxy(object):
         for serv in gobtw_servers:
             if not re.match("_[0-9]+_"+svcname, serv):
                 continue
-            if serv not in current_servers:
+            if serv not in current_servers or not current_servers:
                 print("service '%s' no longer exists, deleting it" % serv)
-                self.del_services_lb(serv)
+                self.del_gobtw(serv)
 
     @staticmethod
     def parse_change(change):
@@ -653,12 +658,8 @@ class GoBetweenProxy(object):
                 self.add_services_lb(svcname)
                 self.gobtw_current_servers(svcname)
             else:
-                result = requests.get(self.url + "/servers", timeout=self.req_timeout).json()
-                if svcname in result:
-                    print("service '%s' no longer enables load balancing" % svcname)
-                    self.del_services_lb(svcname)
-                else:
-                    print("service '%s' doesn't enable load balancing" % svcname)
+                print("service '%s' no longer enables load balancing" % svcname)
+                self.del_services_lb(svcname)
         elif evt == "delete":
             self.del_services_lb(svcname)
 
@@ -696,7 +697,7 @@ class GoBetweenProxy(object):
         """
         self.osvc_daemon_status()
         for svcname, sdata in self.daemon_status_data["monitor"]["services"].items():
-            if self.is_scaler_slave(svcname) or sdata["avail"] != "up":
+            if self.is_scaler_slave(svcname):
                 continue
             config = self.osvc_service_config(svcname)
             if not self.service_needs_lb(config):
