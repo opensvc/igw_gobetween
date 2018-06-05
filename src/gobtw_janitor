@@ -347,11 +347,10 @@ class GoBetweenProxy(object):
         """
         expose = {}
         binds = self.osvc_service_env_section(svcname)["igw_gobtw_bind"].split()
-
         # example binds:
         # - 8080/tcp
         # - 8005/tcp-0.0.0.0:1105
-
+        trash = [] 
         for bind in binds:
             try:
                 back, front = bind.split("-")
@@ -363,8 +362,14 @@ class GoBetweenProxy(object):
                 port = int(port)
             except ValueError:
                 print("service %s misformatted bind: %s" % (svcname, bind))
+                trash.append(bind)
                 continue
             expose[(port, protocol)] = front
+        if trash:
+            new_binds = list(set(binds) - set(trash))
+            set_env = " ".join(new_binds)
+            self.osvc_service_set_bind(svcname, set_env)
+            time.sleep(1) 
         return expose
 
     def get_service_app(self, svcname):
@@ -439,8 +444,11 @@ class GoBetweenProxy(object):
         """
         Add or update a service to the GoBetween configuration through API Rest.
         """
-
-        for srv_records in self.get_gobtw_srv_lookup_pattern(svcname):
+        srv_lookup_pattern = self.get_gobtw_srv_lookup_pattern(svcname)
+        if not srv_lookup_pattern:
+            print("service '%s': IGW_GOBTW_BIND keyword erroneous syntax" % svcname)
+            return
+        for srv_records in srv_lookup_pattern:
             current_igw_bind = []
             server = "%s_%s" % (srv_records.split(".")[0], svcname)
             url_service = self.url_service(server)
@@ -562,9 +570,11 @@ class GoBetweenProxy(object):
         Deleting services whether it's necessary in order to be in sync with the OpenSVC configuration file.
         """
         current_servers = []
-        for elem in self.get_gobtw_srv_lookup_pattern(svcname):
-            server = "%s_%s" % (elem.split(".")[0], svcname)
-            current_servers.append(server)
+        srv_lookup_pattern = self.get_gobtw_srv_lookup_pattern(svcname)
+        if srv_lookup_pattern:
+            for elem in srv_lookup_pattern:
+                server = "%s_%s" % (elem.split(".")[0], svcname)
+                current_servers.append(server)
         gobtw_servers = self.gobtw_get_servers()
         for serv in gobtw_servers:
             if not re.match("_[0-9]+_"+svcname, serv):
