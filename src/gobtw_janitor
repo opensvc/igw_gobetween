@@ -103,8 +103,8 @@ GOBETWEEN_DATA = {
         "srv_dns_protocol": "tcp",
         "srv_lookup_server": "",
         "srv_lookup_pattern": "",
-        "interval": "0",
-        "timeout": "0"
+        "interval": "5s",
+        "timeout": "5s"
     },
     "healthcheck": {
         "fails": 1,
@@ -465,7 +465,7 @@ class GoBetweenProxy(object):
                     continue
                 if isinstance(KEYWORD_PROXY[key], list):
                     data[KEYWORD_PROXY[key][0]][KEYWORD_PROXY[key][1]] = val
-                if key == "igw_gobtw_bind":
+                elif key == "igw_gobtw_bind":
                     current_igw_bind = val.split(" ")
                     binding = val.split(" ")
                     for elem in binding:
